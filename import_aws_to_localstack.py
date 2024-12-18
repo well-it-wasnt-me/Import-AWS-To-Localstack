@@ -16,7 +16,8 @@ LIST_COMMANDS = {
     "ec2": "aws ec2 describe-instances",
     "lambda": "aws lambda list-functions",
     "sqs": "aws sqs list-queues",
-    "rds": "aws rds describe-db-instances"
+    "rds": "aws rds describe-db-instances",
+    "dynamodb": "aws dynamodb list-tables"
 }
 
 LOCALSTACK_ENDPOINT = "http://localhost:4566"
@@ -64,7 +65,7 @@ def clone_ec2_instances(filter_name=None):
                 instance_name = next((tag['Value'] for tag in instance.get('Tags', []) if tag['Key'] == 'Name'), None)
                 if filter_name and (not instance_name or filter_name not in instance_name):
                     continue
-                # LocalStack EC2 is limited. mockup to be created here.
+                # EC2 is limited in LocalStack; consider mocking or skipping detailed cloning.
                 pass
 
 def ensure_bucket_exists(bucket_name, s3_client):
@@ -81,13 +82,9 @@ def ensure_bucket_exists(bucket_name, s3_client):
             # Re-raise if it's an unexpected error
             raise
 
-
 def clone_lambda_functions(filter_name=None):
     """Clone Lambda functions from AWS to LocalStack."""
-    # AWS clients (for reading original Lambda functions)
     aws_lambda_client = boto3.client('lambda')
-
-    # LocalStack clients (for creating Lambda functions)
     lambda_client = boto3.client('lambda', endpoint_url=LOCALSTACK_ENDPOINT)
     s3_client = boto3.client('s3', endpoint_url=LOCALSTACK_ENDPOINT)
     ensure_bucket_exists(LOCALSTACK_S3_BUCKET, s3_client)
@@ -113,12 +110,11 @@ def clone_lambda_functions(filter_name=None):
                 details = aws_lambda_client.get_function(FunctionName=function_name)
                 runtime = function["Runtime"]
                 # Use a dummy role ARN compatible with LocalStack
-                # (LocalStack does not validate IAM roles strictly)
                 role = "arn:aws:iam::000000000000:role/lambda-role"
                 handler = function["Handler"]
                 code_url = details["Code"]["Location"]
 
-                # Download the Lambda code from AWS
+                # Download the Lambda code
                 response = requests.get(code_url)
                 if response.status_code != 200:
                     logger.error(f"Failed to download code for Lambda function '{function_name}'")
@@ -133,8 +129,6 @@ def clone_lambda_functions(filter_name=None):
                 s3_client.upload_file(local_code_path, LOCALSTACK_S3_BUCKET, s3_key)
 
                 # Create the Lambda function in LocalStack
-                # Note: LocalStack supports a limited set of runtimes. Ensure that the runtime is supported
-                # or switch to a known supported runtime like "python3.9" if needed.
                 response = lambda_client.create_function(
                     FunctionName=function_name,
                     Runtime=runtime,
@@ -191,7 +185,6 @@ def clone_cognito_user_pools(filter_name=None):
             pool_id = user_pool['Id']
             pool_details = cognito_client.describe_user_pool(UserPoolId=pool_id)['UserPool']
 
-            # Create User Pool in LocalStack (LocalStack support might be limited)
             create_pool_command = (
                 f"aws --endpoint-url={LOCALSTACK_ENDPOINT} cognito-idp create-user-pool "
                 f"--pool-name {pool_details['Name']} --policies '{json.dumps(pool_details['Policies'])}' "
@@ -221,12 +214,9 @@ def clone_rds_instances(filter_name=None):
                 if filter_name and filter_name not in db_instance_id:
                     continue
 
-                # Extract minimal parameters
                 db_instance_class = db_instance.get("DBInstanceClass", "db.t2.micro")
                 engine = db_instance.get("Engine", "mysql")
 
-                # Ideally you'd extract more parameters from the DB instance and replicate them.
-                # For demonstration:
                 create_db_command = (
                     f"aws --endpoint-url={LOCALSTACK_ENDPOINT} rds create-db-instance "
                     f"--db-instance-identifier {db_instance_id} "
@@ -244,6 +234,113 @@ def clone_rds_instances(filter_name=None):
         except Exception as e:
             logger.error(f"Error cloning RDS instances: {e}")
             print(f"Error cloning RDS instances: {e}")
+
+def clone_dynamodb_tables(filter_name=None):
+    """Clone DynamoDB tables from AWS to LocalStack."""
+
+    aws_dynamodb_client = boto3.client('dynamodb')
+    local_dynamodb_client = boto3.client('dynamodb', endpoint_url=LOCALSTACK_ENDPOINT)
+
+    output, error = run_command(LIST_COMMANDS["dynamodb"])
+    if error:
+        print(f"Failed to list DynamoDB tables: {error}")
+        return
+    if output:
+        tables = json.loads(output).get("TableNames", [])
+        for table_name in tqdm(tables, desc="Cloning DynamoDB tables"):
+            if filter_name and filter_name not in table_name:
+                continue
+            try:
+                desc = aws_dynamodb_client.describe_table(TableName=table_name)
+                table_def = desc["Table"]
+                key_schema = table_def["KeySchema"]
+                attribute_definitions = table_def["AttributeDefinitions"]
+                global_secondary_indexes = table_def.get("GlobalSecondaryIndexes", [])
+                local_secondary_indexes = table_def.get("LocalSecondaryIndexes", [])
+
+                # Check billing mode
+                billing_mode = table_def.get("BillingModeSummary", {}).get("BillingMode", "PROVISIONED")
+
+                create_params = {
+                    "TableName": table_name,
+                    "KeySchema": key_schema,
+                    "AttributeDefinitions": attribute_definitions,
+                }
+
+                # For GSI/LSI, we still need to specify them even if PAY_PER_REQUEST
+                if global_secondary_indexes:
+                    # For on-demand tables, GSIs should also be on-demand (no provisioned throughput).
+                    # If original table is on-demand, just remove throughput from GSIs
+                    if billing_mode == "PAY_PER_REQUEST":
+                        create_params["GlobalSecondaryIndexes"] = [
+                            {
+                                "IndexName": gsi["IndexName"],
+                                "KeySchema": gsi["KeySchema"],
+                                "Projection": gsi["Projection"]
+                            } for gsi in global_secondary_indexes
+                        ]
+                    else:
+                        create_params["GlobalSecondaryIndexes"] = [
+                            {
+                                "IndexName": gsi["IndexName"],
+                                "KeySchema": gsi["KeySchema"],
+                                "Projection": gsi["Projection"],
+                                "ProvisionedThroughput": {
+                                    "ReadCapacityUnits": max(1, gsi["ProvisionedThroughput"]["ReadCapacityUnits"]),
+                                    "WriteCapacityUnits": max(1, gsi["ProvisionedThroughput"]["WriteCapacityUnits"])
+                                }
+                            } for gsi in global_secondary_indexes
+                        ]
+
+                if local_secondary_indexes:
+                    # LSI does not allow changing billing mode but doesn't require throughput specification.
+                    create_params["LocalSecondaryIndexes"] = [
+                        {
+                            "IndexName": lsi["IndexName"],
+                            "KeySchema": lsi["KeySchema"],
+                            "Projection": lsi["Projection"]
+                        } for lsi in local_secondary_indexes
+                    ]
+
+                if billing_mode == "PAY_PER_REQUEST":
+                    create_params["BillingMode"] = "PAY_PER_REQUEST"
+                else:
+                    # If provisioned, ensure throughput values are at least 1
+                    provisioned_throughput = table_def["ProvisionedThroughput"]
+                    create_params["ProvisionedThroughput"] = {
+                        "ReadCapacityUnits": max(1, provisioned_throughput["ReadCapacityUnits"]),
+                        "WriteCapacityUnits": max(1, provisioned_throughput["WriteCapacityUnits"])
+                    }
+
+                # Attempt to create the table in LocalStack
+                try:
+                    local_dynamodb_client.create_table(**create_params)
+                    local_dynamodb_client.get_waiter('table_exists').wait(TableName=table_name)
+                    print(f"Created DynamoDB table '{table_name}' in LocalStack.")
+                except local_dynamodb_client.exceptions.ResourceInUseException:
+                    print(f"Table '{table_name}' already exists in LocalStack, skipping creation.")
+
+                # Copy data from AWS to LocalStack
+                paginator = aws_dynamodb_client.get_paginator('scan')
+                items_to_copy = []
+                for page in paginator.paginate(TableName=table_name):
+                    items = page.get("Items", [])
+                    for item in items:
+                        items_to_copy.append({"PutRequest": {"Item": item}})
+                        if len(items_to_copy) == 25:
+                            local_dynamodb_client.batch_write_item(RequestItems={table_name: items_to_copy})
+                            items_to_copy = []
+                if items_to_copy:
+                    local_dynamodb_client.batch_write_item(RequestItems={table_name: items_to_copy})
+
+                print(f"Successfully cloned DynamoDB table '{table_name}' with data into LocalStack.")
+
+            except aws_dynamodb_client.exceptions.ResourceNotFoundException:
+                print(f"Source DynamoDB table '{table_name}' not found. Skipping.")
+            except Exception as e:
+                logger.error(f"Error cloning DynamoDB table '{table_name}': {e}")
+                print(f"Error cloning DynamoDB table '{table_name}': {e}")
+
 
 def wait_for_localstack():
     """Wait for LocalStack to be ready."""
@@ -267,7 +364,7 @@ def print_banner():
 def display_menu():
     print("Select services to clone:")
     print("1. Clone all services")
-    print("2. Clone specific services (s3, ec2, lambda, sqs, cognito, rds)")
+    print("2. Clone specific services (s3, ec2, lambda, sqs, cognito, rds, dynamodb)")
 
 def start_localstack():
     """Start LocalStack using Docker Compose and wait until it's ready."""
@@ -288,7 +385,8 @@ def main(clone_all, filter_name=None, selected_services=None):
             "lambda": clone_lambda_functions,
             "sqs": clone_sqs_queues,
             "cognito": clone_cognito_user_pools,
-            "rds": clone_rds_instances
+            "rds": clone_rds_instances,
+            "dynamodb": clone_dynamodb_tables
         }
 
         with ThreadPoolExecutor() as executor:
@@ -328,7 +426,7 @@ if __name__ == "__main__":
         parser.add_argument('--all', action='store_true', help='Clone all services')
         parser.add_argument('--specific', help='Filter services by name')
         parser.add_argument('--services', nargs='+',
-                            help='List of specific services to clone (s3, ec2, lambda, sqs, cognito, rds)')
+                            help='List of specific services to clone (s3, ec2, lambda, sqs, cognito, rds, dynamodb)')
 
         args = parser.parse_args()
 
@@ -342,7 +440,7 @@ if __name__ == "__main__":
                 selected_services = None
             elif choice == "2":
                 selected_services = input(
-                    "Enter services to clone (s3, ec2, lambda, sqs, cognito, rds) separated by spaces: ").strip().split()
+                    "Enter services to clone (s3, ec2, lambda, sqs, cognito, rds, dynamodb) separated by spaces: ").strip().split()
                 clone_all = False
             else:
                 print("Invalid choice. Exiting.")
