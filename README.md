@@ -9,6 +9,7 @@ Hey there, tech wizard! Ever wished you could just snap your fingers and have al
 - **Clone Lambda Functions**: Functions that actually do stuff, not just `hello world`.
 - **Clone SQS Queues**: Get those messages flowing.
 - **Clone Cognito IdP**: Get your users.
+- **Clone DynamoDB and Data**: Get your Dynamo Data.
 - **Progress Bar**: Because watching progress bars is more satisfying than watching paint dry.
 - **Logging**: In case something goes wrong, you'll know who to blame.
 - **Command-Line Interface**: For those who like to type their way to success.
