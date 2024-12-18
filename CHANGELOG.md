@@ -1,7 +1,15 @@
 # CHANGELOG
 
 
+## v0.3.0 (2024-12-18)
+
+
 ## v0.2.1 (2024-12-18)
+
+### Features
+
+- Dynamodb cloning
+  ([`9618036`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/96180367126a73e1799d1b798dd4a268ca6954e1))
 
 
 ## v0.2.0 (2024-12-18)
