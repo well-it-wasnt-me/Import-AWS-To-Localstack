@@ -1,15 +1,48 @@
 # CHANGELOG
 
 
+## v0.2.0 (2024-12-18)
+
+### Build System
+
+- **deps**: Bump requests from 2.26.0 to 2.32.2
+  ([`7c55fee`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/7c55fee288219ff896e9b0ec1497ac91657a673b))
+
+Bumps [requests](https://github.com/psf/requests) from 2.26.0 to 2.32.2. - [Release
+  notes](https://github.com/psf/requests/releases) -
+  [Changelog](https://github.com/psf/requests/blob/main/HISTORY.md) -
+  [Commits](https://github.com/psf/requests/compare/v2.26.0...v2.32.2)
+
+--- updated-dependencies: - dependency-name: requests dependency-type: direct:production
+
+...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump tqdm from 4.62.3 to 4.66.3
+  ([`1d6be16`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/1d6be165ca370cafcb4773137bb5cf0a5e4fe424))
+
+Bumps [tqdm](https://github.com/tqdm/tqdm) from 4.62.3 to 4.66.3. - [Release
+  notes](https://github.com/tqdm/tqdm/releases) -
+  [Commits](https://github.com/tqdm/tqdm/compare/v4.62.3...v4.66.3)
+
+--- updated-dependencies: - dependency-name: tqdm dependency-type: direct:production
+
+...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+### Features
+
+- Added rds clone
+  ([`39075a5`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/39075a56a8feaeba7f07539ffd9e55e6b9e3fe90))
+
 
 ## v0.1.0 (2024-06-06)
 
-### Feature
+### Features
 
-* feat: 1st release
+- 1st release
+  ([`b0f564c`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/b0f564c87dc0aeef41b0e164b9ba24bece0f4995))
 
-few things to figure out...but overall is working ! ([`b0f564c`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/b0f564c87dc0aeef41b0e164b9ba24bece0f4995))
-
-### Unknown
-
-* Initial commit ([`3beb18a`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/3beb18aeb23eb73e54a2c5437083e5792c895492))
+few things to figure out...but overall is working !
