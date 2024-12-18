@@ -2,12 +2,12 @@ version: "3.8"
 
 services:
   localstack:
-    image: localstack/localstack
+    image: localstack/localstack-pro
     ports:
       - "4566:4566"
       - "4571:4571"
     environment:
-      - SERVICES=s3,ec2,lambda,sqs,cognito-idp
+      - SERVICES=s3,ec2,lambda,sqs,cognito-idp,rds
       - DEFAULT_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=INSERT-KEY-HERE
       - AWS_SECRET_ACCESS_KEY=INSERT-SECRET-HERE

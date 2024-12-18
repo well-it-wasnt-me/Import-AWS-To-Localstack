@@ -15,7 +15,8 @@ LIST_COMMANDS = {
     "s3": "aws s3api list-buckets",
     "ec2": "aws ec2 describe-instances",
     "lambda": "aws lambda list-functions",
-    "sqs": "aws sqs list-queues"
+    "sqs": "aws sqs list-queues",
+    "rds": "aws rds describe-db-instances"
 }
 
 LOCALSTACK_ENDPOINT = "http://localhost:4566"
@@ -63,7 +64,8 @@ def clone_ec2_instances(filter_name=None):
                 instance_name = next((tag['Value'] for tag in instance.get('Tags', []) if tag['Key'] == 'Name'), None)
                 if filter_name and (not instance_name or filter_name not in instance_name):
                     continue
-                pass  # Extract necessary instance details and create instances in LocalStack
+                # LocalStack EC2 is limited. mockup to be created here.
+                pass
 
 def ensure_bucket_exists(bucket_name, s3_client):
     """Ensure the specified S3 bucket exists in LocalStack."""
@@ -93,7 +95,7 @@ def clone_lambda_functions(filter_name=None):
             if filter_name and filter_name not in function_name:
                 continue
 
-            local_code_path = None  # Initialize local_code_path here
+            local_code_path = None
 
             # Fetch additional details for the function
             try:
@@ -158,7 +160,6 @@ def clone_sqs_queues(filter_name=None):
             if error:
                 print(f"Failed to create SQS queue '{queue_name}': {error}")
 
-
 def clone_cognito_user_pools(filter_name=None):
     """Clone Cognito User Pools from AWS to LocalStack."""
     cognito_client = boto3.client('cognito-idp')
@@ -171,7 +172,7 @@ def clone_cognito_user_pools(filter_name=None):
             pool_id = user_pool['Id']
             pool_details = cognito_client.describe_user_pool(UserPoolId=pool_id)['UserPool']
 
-            # Create User Pool in LocalStack
+            # Create User Pool in LocalStack (LocalStack support might be limited)
             create_pool_command = (
                 f"aws --endpoint-url={LOCALSTACK_ENDPOINT} cognito-idp create-user-pool "
                 f"--pool-name {pool_details['Name']} --policies '{json.dumps(pool_details['Policies'])}' "
@@ -183,6 +184,47 @@ def clone_cognito_user_pools(filter_name=None):
     except Exception as e:
         logger.error(f"Error cloning Cognito User Pools: {e}")
         print(f"Error cloning Cognito User Pools: {e}")
+
+def clone_rds_instances(filter_name=None):
+    """Clone RDS instances from AWS to LocalStack."""
+    output, error = run_command(LIST_COMMANDS["rds"])
+    if error:
+        print(f"Failed to describe RDS instances: {error}")
+        return
+    if output:
+        try:
+            rds_data = json.loads(output)
+            db_instances = rds_data.get("DBInstances", [])
+            for db_instance in tqdm(db_instances, desc="Cloning RDS instances"):
+                db_instance_id = db_instance.get("DBInstanceIdentifier")
+                if not db_instance_id:
+                    continue
+                if filter_name and filter_name not in db_instance_id:
+                    continue
+
+                # Extract minimal parameters
+                db_instance_class = db_instance.get("DBInstanceClass", "db.t2.micro")
+                engine = db_instance.get("Engine", "mysql")
+
+                # Ideally you'd extract more parameters from the DB instance and replicate them.
+                # For demonstration:
+                create_db_command = (
+                    f"aws --endpoint-url={LOCALSTACK_ENDPOINT} rds create-db-instance "
+                    f"--db-instance-identifier {db_instance_id} "
+                    f"--db-instance-class {db_instance_class} "
+                    f"--engine {engine} "
+                    "--master-username master --master-user-password secret99 "
+                )
+
+                _, error = run_command(create_db_command)
+                if error:
+                    print(f"Failed to create RDS instance '{db_instance_id}': {error}")
+        except KeyError as e:
+            logger.error(f"KeyError while parsing RDS output: {e}")
+            print(f"KeyError while parsing RDS output: {e}")
+        except Exception as e:
+            logger.error(f"Error cloning RDS instances: {e}")
+            print(f"Error cloning RDS instances: {e}")
 
 def wait_for_localstack():
     """Wait for LocalStack to be ready."""
@@ -206,7 +248,7 @@ def print_banner():
 def display_menu():
     print("Select services to clone:")
     print("1. Clone all services")
-    print("2. Clone specific services (s3, ec2, lambda, sqs, cognito)")
+    print("2. Clone specific services (s3, ec2, lambda, sqs, cognito, rds)")
 
 def start_localstack():
     """Start LocalStack using Docker Compose and wait until it's ready."""
@@ -217,7 +259,6 @@ def start_localstack():
         logger.error(f"Failed to start LocalStack: {e}")
         raise
 
-
 def main(clone_all, filter_name=None, selected_services=None):
     try:
         start_localstack()
@@ -227,7 +268,8 @@ def main(clone_all, filter_name=None, selected_services=None):
             "ec2": clone_ec2_instances,
             "lambda": clone_lambda_functions,
             "sqs": clone_sqs_queues,
-            "cognito": clone_cognito_user_pools
+            "cognito": clone_cognito_user_pools,
+            "rds": clone_rds_instances
         }
 
         with ThreadPoolExecutor() as executor:
@@ -259,7 +301,6 @@ def main(clone_all, filter_name=None, selected_services=None):
         print(f"An error occurred: {e}")
         logger.error(f"An error occurred: {e}")
 
-
 if __name__ == "__main__":
     try:
         boto3.client('sts').get_caller_identity()  # Test AWS credentials
@@ -268,7 +309,7 @@ if __name__ == "__main__":
         parser.add_argument('--all', action='store_true', help='Clone all services')
         parser.add_argument('--specific', help='Filter services by name')
         parser.add_argument('--services', nargs='+',
-                            help='List of specific services to clone (s3, ec2, lambda, sqs, cognito)')
+                            help='List of specific services to clone (s3, ec2, lambda, sqs, cognito, rds)')
 
         args = parser.parse_args()
 
@@ -282,7 +323,7 @@ if __name__ == "__main__":
                 selected_services = None
             elif choice == "2":
                 selected_services = input(
-                    "Enter services to clone (s3, ec2, lambda, sqs, cognito) separated by spaces: ").strip().split()
+                    "Enter services to clone (s3, ec2, lambda, sqs, cognito, rds) separated by spaces: ").strip().split()
                 clone_all = False
             else:
                 print("Invalid choice. Exiting.")
