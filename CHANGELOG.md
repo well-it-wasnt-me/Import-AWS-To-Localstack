@@ -1,7 +1,15 @@
 # CHANGELOG
 
 
+## v0.2.1 (2024-12-18)
+
+
 ## v0.2.0 (2024-12-18)
+
+### Bug Fixes
+
+- Lambda clone function and bucket creation
+  ([`1f8d703`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/1f8d703dffd2995c100c2ae1aa735ca61791060d))
 
 ### Build System
 
