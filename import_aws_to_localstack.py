@@ -20,7 +20,7 @@ LIST_COMMANDS = {
 }
 
 LOCALSTACK_ENDPOINT = "http://localhost:4566"
-LOCALSTACK_S3_BUCKET = "localstack-bucket"
+LOCALSTACK_S3_BUCKET = "localstack2-bucket"
 
 # Configure logging
 logging.basicConfig(filename='clone_aws_to_localstack.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -72,15 +72,26 @@ def ensure_bucket_exists(bucket_name, s3_client):
     try:
         s3_client.head_bucket(Bucket=bucket_name)
         print(f"Bucket '{bucket_name}' already exists.")
-    except s3_client.exceptions.NoSuchBucket:
-        print(f"Bucket '{bucket_name}' does not exist. Creating it.")
-        s3_client.create_bucket(Bucket=bucket_name)
+    except s3_client.exceptions.ClientError as e:
+        error_code = e.response['Error'].get('Code', '')
+        if error_code == '404':
+            print(f"Bucket '{bucket_name}' does not exist. Creating it.")
+            s3_client.create_bucket(Bucket=bucket_name)
+        else:
+            # Re-raise if it's an unexpected error
+            raise
+
 
 def clone_lambda_functions(filter_name=None):
     """Clone Lambda functions from AWS to LocalStack."""
-    client = boto3.client('lambda')
+    # AWS clients (for reading original Lambda functions)
+    aws_lambda_client = boto3.client('lambda')
+
+    # LocalStack clients (for creating Lambda functions)
+    lambda_client = boto3.client('lambda', endpoint_url=LOCALSTACK_ENDPOINT)
     s3_client = boto3.client('s3', endpoint_url=LOCALSTACK_ENDPOINT)
     ensure_bucket_exists(LOCALSTACK_S3_BUCKET, s3_client)
+
     output, error = run_command(LIST_COMMANDS["lambda"])
     if error:
         print(f"Failed to list Lambda functions: {error}")
@@ -97,15 +108,17 @@ def clone_lambda_functions(filter_name=None):
 
             local_code_path = None
 
-            # Fetch additional details for the function
+            # Fetch additional details for the function from AWS
             try:
-                details = client.get_function(FunctionName=function_name)
+                details = aws_lambda_client.get_function(FunctionName=function_name)
                 runtime = function["Runtime"]
-                role = function["Role"]
+                # Use a dummy role ARN compatible with LocalStack
+                # (LocalStack does not validate IAM roles strictly)
+                role = "arn:aws:iam::000000000000:role/lambda-role"
                 handler = function["Handler"]
                 code_url = details["Code"]["Location"]
 
-                # Download the Lambda code
+                # Download the Lambda code from AWS
                 response = requests.get(code_url)
                 if response.status_code != 200:
                     logger.error(f"Failed to download code for Lambda function '{function_name}'")
@@ -120,7 +133,9 @@ def clone_lambda_functions(filter_name=None):
                 s3_client.upload_file(local_code_path, LOCALSTACK_S3_BUCKET, s3_key)
 
                 # Create the Lambda function in LocalStack
-                response = client.create_function(
+                # Note: LocalStack supports a limited set of runtimes. Ensure that the runtime is supported
+                # or switch to a known supported runtime like "python3.9" if needed.
+                response = lambda_client.create_function(
                     FunctionName=function_name,
                     Runtime=runtime,
                     Role=role,
@@ -131,12 +146,16 @@ def clone_lambda_functions(filter_name=None):
                     },
                     Publish=True
                 )
-                if response['ResponseMetadata']['HTTPStatusCode'] != 201:
-                    print(f"Failed to create Lambda function '{function_name}'")
+
+                if response['ResponseMetadata']['HTTPStatusCode'] not in [200, 201]:
+                    print(f"Failed to create Lambda function '{function_name}' in LocalStack")
+                else:
+                    print(f"Successfully cloned Lambda function '{function_name}' into LocalStack.")
+
             except KeyError as e:
                 logger.error(f"KeyError: {e} in function details: {details}")
                 print(f"KeyError: {e} in function details: {details}")
-            except client.exceptions.ClientError as e:
+            except aws_lambda_client.exceptions.ClientError as e:
                 logger.error(f"ClientError: {e} in function: {function_name}")
                 print(f"ClientError: {e} in function: {function_name}")
             finally:
