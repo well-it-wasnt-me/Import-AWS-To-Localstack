@@ -10,6 +10,7 @@ Hey there, tech wizard! Ever wished you could just snap your fingers and have al
 - **Clone SQS Queues**: Get those messages flowing.
 - **Clone Cognito IdP**: Get your users.
 - **Clone DynamoDB and Data**: Get your Dynamo Data.
+- **Clone RDS and Data**: Get your RDS Data.
 - **Progress Bar**: Because watching progress bars is more satisfying than watching paint dry.
 - **Logging**: In case something goes wrong, you'll know who to blame.
 - **Command-Line Interface**: For those who like to type their way to success.
@@ -32,10 +33,10 @@ Hey there, tech wizard! Ever wished you could just snap your fingers and have al
 1. Clone this repository:
     ```bash
     git clone https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack.git
-    cd Import-AWS-To-Localstack.git
+    cd Import-AWS-To-Localstack
     ```
    
-2. Update docker-compose.yml with your AWS keys
+2. Copy .env.dist to .env and update docker-compose.yml as well with your datas
 
 
 3. Start venv and install the dependencies:
