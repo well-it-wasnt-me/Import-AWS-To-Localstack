@@ -1,7 +1,20 @@
 # CHANGELOG
 
 
+## v0.4.0 (2025-01-06)
+
+### Features
+
+- Copy data from remote RDS to local MySQL
+  ([`e8431f8`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/e8431f85753aea5e5c417e62185a046d180377ae))
+
+
 ## v0.3.0 (2024-12-18)
+
+### Chores
+
+- Readme update [Skip CI]
+  ([`2cfa909`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/2cfa909b3c68f0b24bc4c6ed894efd03fd8889d7))
 
 
 ## v0.2.1 (2024-12-18)
