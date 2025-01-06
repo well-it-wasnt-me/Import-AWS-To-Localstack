@@ -10,6 +10,9 @@ from pyfiglet import Figlet
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 LIST_COMMANDS = {
     "s3": "aws s3api list-buckets",
@@ -20,11 +23,11 @@ LIST_COMMANDS = {
     "dynamodb": "aws dynamodb list-tables"
 }
 
-LOCALSTACK_ENDPOINT = "http://localhost:4566"
-LOCALSTACK_S3_BUCKET = "localstack2-bucket"
+LOCALSTACK_ENDPOINT = os.environ.get("LOCALSTACK_ENDPOINT", "http://localhost:4566")
+LOCALSTACK_S3_BUCKET = os.environ.get("LOCALSTACK_S3_BUCKET", "localstack2-bucket")
 
 # Configure logging
-logging.basicConfig(filename='clone_aws_to_localstack.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(filename=os.environ.get("LOG_FILE_NAME", "clone_aws_to_localstack.log"), level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
 
 def run_command(command):
@@ -34,6 +37,17 @@ def run_command(command):
         logger.error(f"Error running command: {command} - {result.stderr}")
         return None, result.stderr
     return result.stdout, None
+
+# AWS RDS master credentials
+AWS_RDS_MASTER_USERNAME = os.environ.get("AWS_RDS_MASTER_USERNAME", "admin")
+AWS_RDS_MASTER_PASSWORD = os.environ.get("AWS_RDS_MASTER_PASSWORD", "")
+
+# Local MySQL credentials
+LOCAL_MYSQL_HOST = os.environ.get("LOCAL_MYSQL_HOST", "localhost")
+LOCAL_MYSQL_PORT = int(os.environ.get("LOCAL_MYSQL_PORT", "3306"))
+LOCAL_MYSQL_USER = os.environ.get("LOCAL_MYSQL_USER", "master")
+LOCAL_MYSQL_PASSWORD = os.environ.get("LOCAL_MYSQL_PASSWORD", "secret99")
+LOCAL_MYSQL_DATABASE = os.environ.get("LOCAL_MYSQL_DATABASE", "mydb")
 
 def clone_s3_buckets(filter_name=None):
     """Clone S3 buckets from AWS to LocalStack."""
@@ -198,42 +212,127 @@ def clone_cognito_user_pools(filter_name=None):
         print(f"Error cloning Cognito User Pools: {e}")
 
 def clone_rds_instances(filter_name=None):
-    """Clone RDS instances from AWS to LocalStack."""
+    """
+    Clone RDS instances from AWS to LocalStack, and optionally copy
+    MySQL data.
+    """
     output, error = run_command(LIST_COMMANDS["rds"])
     if error:
         print(f"Failed to describe RDS instances: {error}")
         return
-    if output:
-        try:
-            rds_data = json.loads(output)
-            db_instances = rds_data.get("DBInstances", [])
-            for db_instance in tqdm(db_instances, desc="Cloning RDS instances"):
-                db_instance_id = db_instance.get("DBInstanceIdentifier")
-                if not db_instance_id:
-                    continue
-                if filter_name and filter_name not in db_instance_id:
+    if not output:
+        return
+
+    try:
+        rds_data = json.loads(output)
+        db_instances = rds_data.get("DBInstances", [])
+        for db_instance in tqdm(db_instances, desc="Cloning RDS instances"):
+            db_instance_id = db_instance.get("DBInstanceIdentifier")
+            if not db_instance_id:
+                continue
+            if filter_name and filter_name not in db_instance_id:
+                continue
+
+            # Gather what I need
+            db_instance_class = db_instance.get("DBInstanceClass", "db.t2.micro")
+            engine = db_instance.get("Engine", "mysql").lower()
+
+            # Create the DB in LocalStack
+            print(f"Creating RDS instance '{db_instance_id}' in LocalStack ...")
+            create_db_command = (
+                f"aws --endpoint-url={LOCALSTACK_ENDPOINT} rds create-db-instance "
+                f"--db-instance-identifier {db_instance_id} "
+                f"--db-instance-class {db_instance_class} "
+                f"--engine {engine} "
+                f"--master-username {LOCAL_MYSQL_USER} "
+                f"--master-user-password {LOCAL_MYSQL_PASSWORD} "
+            )
+            _, create_err = run_command(create_db_command)
+            if create_err:
+                print(f"Failed to create RDS instance '{db_instance_id}': {create_err}")
+                continue
+
+            # If MySQL/Aurora ask to copy data from AWS
+            if engine in ["mysql", "aurora-mysql"]:
+                copy_data_input = input(
+                    f"Do you want to copy actual data from AWS RDS instance '{db_instance_id}' to LocalStack? (y/n): "
+                ).strip().lower()
+
+                if not copy_data_input.startswith("y"):
+                    print(f"Skipping data copy for RDS instance '{db_instance_id}'.")
                     continue
 
-                db_instance_class = db_instance.get("DBInstanceClass", "db.t2.micro")
-                engine = db_instance.get("Engine", "mysql")
+                print(f"Attempting to copy data from AWS RDS '{db_instance_id}' ...")
 
-                create_db_command = (
-                    f"aws --endpoint-url={LOCALSTACK_ENDPOINT} rds create-db-instance "
-                    f"--db-instance-identifier {db_instance_id} "
-                    f"--db-instance-class {db_instance_class} "
-                    f"--engine {engine} "
-                    "--master-username master --master-user-password secret99 "
+                endpoint_info = db_instance.get("Endpoint")
+                if not endpoint_info:
+                    print(f"No endpoint found for '{db_instance_id}'. Skipping data copy.")
+                    continue
+
+                aws_rds_host = endpoint_info["Address"]
+                aws_rds_port = endpoint_info["Port"]
+
+                # Try to get the AWS master username from the instance, or fallback to env
+                aws_rds_user = db_instance.get("MasterUsername", AWS_RDS_MASTER_USERNAME)
+                aws_rds_db_name = db_instance.get("DBName")
+                if not aws_rds_db_name:
+                    print(f"No 'DBName' found for '{db_instance_id}'. Skipping data copy.")
+                    continue
+
+                # Use the .env password for the real AWS RDS Password
+                if not AWS_RDS_MASTER_PASSWORD:
+                    print(
+                        "Warning: AWS_RDS_MASTER_PASSWORD not found in .env. "
+                        f"Cannot connect to AWS RDS '{db_instance_id}'. Skipping data copy."
+                    )
+                    continue
+
+                dump_file = f"/tmp/{db_instance_id}.sql"
+
+                # Dump from AWS RDS (requires mysqldump)
+                dump_cmd = (
+                    f"mysqldump -h {aws_rds_host} -P {aws_rds_port} "
+                    f"-u {aws_rds_user} -p'{AWS_RDS_MASTER_PASSWORD}' {aws_rds_db_name} "
+                    f"> {dump_file}"
+                )
+                print(f"Dumping data from AWS RDS with command:\n  {dump_cmd}")
+                _, dump_err = run_command(dump_cmd)
+                if dump_err:
+                    print(f"mysqldump failed: {dump_err}")
+                    continue
+
+                # Wait for Local MySQL to become available
+                print("Waiting for MySQL to become ready (sleep 20s) ...")
+                time.sleep(20)  # @todo make this better
+
+                # Import into Local MySQL
+                import_cmd = (
+                    f"mysql -h {LOCAL_MYSQL_HOST} -P {LOCAL_MYSQL_PORT} "
+                    f"-u {LOCAL_MYSQL_USER} -p'{LOCAL_MYSQL_PASSWORD}' {LOCAL_MYSQL_DATABASE} "
+                    f"< {dump_file}"
+                )
+                print(f"Importing data into mysql with command:\n  {import_cmd}")
+                _, import_err = run_command(import_cmd)
+                if import_err:
+                    print(f"Data import failed: {import_err}")
+                else:
+                    print(f"Successfully imported data into LocalStack RDS for '{db_instance_id}'.")
+
+                # Clean up dump file
+                if os.path.exists(dump_file):
+                    os.remove(dump_file)
+            else:
+                print(
+                    f"Engine '{engine}' is not recognized as MySQL. "
+                    "Skipping data import."
                 )
 
-                _, error = run_command(create_db_command)
-                if error:
-                    print(f"Failed to create RDS instance '{db_instance_id}': {error}")
-        except KeyError as e:
-            logger.error(f"KeyError while parsing RDS output: {e}")
-            print(f"KeyError while parsing RDS output: {e}")
-        except Exception as e:
-            logger.error(f"Error cloning RDS instances: {e}")
-            print(f"Error cloning RDS instances: {e}")
+    except KeyError as e:
+        logger.error(f"KeyError while parsing RDS output: {e}")
+        print(f"KeyError while parsing RDS output: {e}")
+    except Exception as e:
+        logger.error(f"Error cloning RDS instances: {e}")
+        print(f"Error cloning RDS instances: {e}")
 
 def clone_dynamodb_tables(filter_name=None):
     """Clone DynamoDB tables from AWS to LocalStack."""

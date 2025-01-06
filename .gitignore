@@ -1,3 +1,4 @@
 .idea/
 localstack-env/
 clone_aws_to_localstack.log
+.env
