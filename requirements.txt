@@ -1,4 +1,4 @@
-boto3==1.20.24
+boto3==1.36.0
 tqdm==4.66.3
 pyfiglet==0.8.post1
 docker==6.1.3
