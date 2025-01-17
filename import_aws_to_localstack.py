@@ -200,9 +200,11 @@ def clone_cognito_user_pools(filter_name=None):
     """
     Clone Cognito User Pools (and associated clients) from AWS to LocalStack,
     including copying users from the pool, using Boto3 calls to create the pool.
+    Also stubs out any Lambda triggers so they don't cause "Function not found" errors.
     """
     cognito_client_aws = boto3.client('cognito-idp')
     cognito_client_local = boto3.client('cognito-idp', endpoint_url=LOCALSTACK_ENDPOINT)
+    lambda_client_local = boto3.client('lambda', endpoint_url=LOCALSTACK_ENDPOINT)
 
     try:
         user_pools = cognito_client_aws.list_user_pools(MaxResults=60)['UserPools']
@@ -213,12 +215,12 @@ def clone_cognito_user_pools(filter_name=None):
 
             pool_id = user_pool['Id']
             pool_details = cognito_client_aws.describe_user_pool(UserPoolId=pool_id)['UserPool']
-            print(pool_details.get("SchemaAttributes"))
 
             # ----------------------------------------------------------------
-            # 1) Build the arguments for creating the user pool in LocalStack
+            # 1) Prepare the user pool creation arguments for LocalStack
             # ----------------------------------------------------------------
-            aws_schema = [
+            # If you need more custom attributes, add them here or replicate the entire AWS schema
+            custom_schema = [
                 {
                     "Name": "custom:company",
                     "AttributeDataType": "String",
@@ -229,17 +231,23 @@ def clone_cognito_user_pools(filter_name=None):
 
             create_pool_args = {
                 "PoolName": pool_details["Name"],
-                "Schema": aws_schema,  # includes custom attributes if present
+                "Schema": custom_schema,
             }
 
             if "Policies" in pool_details:
                 create_pool_args["Policies"] = pool_details["Policies"]
+
+            # If there's a LambdaConfig, replicate it if you want triggers. Or remove it if you don't.
             if "LambdaConfig" in pool_details:
-                create_pool_args["LambdaConfig"] = pool_details["LambdaConfig"]
-            # am i forgetting something ?
+                # Step A) Stub each function ARN so it's recognized in LocalStack
+                lambda_config = pool_details["LambdaConfig"]
+                stub_trigger_lambdas(lambda_config, lambda_client_local)
+
+                # Step B) Now include it in create_pool_args so the triggers apply
+                create_pool_args["LambdaConfig"] = lambda_config
 
             # ----------------------------------------------------------------
-            # 2) Actually create the pool in LocalStack
+            # 2) Create the user pool in LocalStack
             # ----------------------------------------------------------------
             try:
                 local_pool_resp = cognito_client_local.create_user_pool(**create_pool_args)
@@ -255,8 +263,7 @@ def clone_cognito_user_pools(filter_name=None):
             # ----------------------------------------------------------------
             try:
                 user_pool_clients = cognito_client_aws.list_user_pool_clients(
-                    UserPoolId=pool_id,
-                    MaxResults=60
+                    UserPoolId=pool_id, MaxResults=60
                 )["UserPoolClients"]
 
                 for upc in user_pool_clients:
@@ -270,8 +277,7 @@ def clone_cognito_user_pools(filter_name=None):
                         create_client_params = {
                             "UserPoolId": local_user_pool_id,
                             "ClientName": client_details["ClientName"],
-                            "AllowedOAuthFlowsUserPoolClient": client_details.get("AllowedOAuthFlowsUserPoolClient",
-                                                                                  False),
+                            "AllowedOAuthFlowsUserPoolClient": client_details.get("AllowedOAuthFlowsUserPoolClient", False),
                             "AllowedOAuthFlows": client_details.get("AllowedOAuthFlows", []),
                             "AllowedOAuthScopes": client_details.get("AllowedOAuthScopes", []),
                             "CallbackURLs": client_details.get("CallbackURLs", []),
@@ -286,10 +292,8 @@ def clone_cognito_user_pools(filter_name=None):
                             "IdTokenValidity": client_details.get("IdTokenValidity", 60),
                         }
 
-                        # Remove None values
-                        create_client_params = {
-                            k: v for k, v in create_client_params.items() if v is not None
-                        }
+                        # Remove None
+                        create_client_params = {k: v for k, v in create_client_params.items() if v is not None}
 
                         client_resp = cognito_client_local.create_user_pool_client(**create_client_params)
                         new_client_id_local = client_resp["UserPoolClient"]["ClientId"]
@@ -307,7 +311,6 @@ def clone_cognito_user_pools(filter_name=None):
             # ----------------------------------------------------------------
             # 4) Clone the Users
             # ----------------------------------------------------------------
-            # Use pagination to fetch all users from AWS
             try:
                 pagination_token = None
                 while True:
@@ -323,10 +326,6 @@ def clone_cognito_user_pools(filter_name=None):
                     for aws_user in aws_users:
                         username = aws_user["Username"]
                         user_attributes = aws_user.get("Attributes", [])
-                        print("User has attributes:", user_attributes)
-                        # If you have custom attributes that are *not* in the local schema,
-                        # you can either define them in the local schema or remove them here, e.g.:
-                        # user_attributes = [att for att in user_attributes if not att["Name"].startswith("custom:")]
 
                         try:
                             cognito_client_local.admin_create_user(
@@ -354,6 +353,59 @@ def clone_cognito_user_pools(filter_name=None):
         logger.error(f"Error cloning Cognito User Pools: {e}")
         print(f"Error cloning Cognito User Pools: {e}")
 
+def stub_trigger_lambdas(lambda_config, lambda_client_local):
+    """
+    Given a 'LambdaConfig' dict (from AWS user pool),
+    attempt to create stub Lambda functions in LocalStack
+    for each trigger ARN (e.g. PreSignUp, PostConfirmation, etc.)
+    so that Cognito won't fail with 'Function not found'.
+    """
+
+    # A quick sample Python code for the stub function
+    # (just returns the event unchanged).
+    STUB_CODE = (
+        "def lambda_handler(event, context):\n"
+        "    return event\n"
+    )
+
+    # Turn the above code into a ZIP in memory so we can pass to create_function
+    import io, zipfile
+    mem_zip = io.BytesIO()
+    with zipfile.ZipFile(mem_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("lambda_function.py", STUB_CODE)
+    mem_zip.seek(0)
+    stub_zip_bytes = mem_zip.read()
+
+    # The keys in LambdaConfig might be PreSignUp, PostConfirmation, CustomMessage, etc.
+    for trigger_key, trigger_arn in lambda_config.items():
+        if not isinstance(trigger_arn, str) or "function:" not in trigger_arn:
+            continue  # skip if it's not a valid ARN
+
+        # Extract the function name from the ARN:
+        # e.g. "arn:aws:lambda:us-east-1:123456789012:function:MyFunc"
+        function_name = trigger_arn.split(":function:")[-1]
+
+        # Check if it already exists in LocalStack
+        try:
+            lambda_client_local.get_function(FunctionName=function_name)
+            print(f"  [stub_trigger_lambdas] Lambda '{function_name}' already exists in LocalStack.")
+            continue
+        except lambda_client_local.exceptions.ResourceNotFoundException:
+            pass  # We'll create it
+
+        # Actually create a stub
+        try:
+            resp = lambda_client_local.create_function(
+                FunctionName=function_name,
+                Runtime="python3.9",
+                Role="arn:aws:iam::000000000000:role/lambda-role",
+                Handler="lambda_function.lambda_handler",
+                Code={"ZipFile": stub_zip_bytes},
+                Publish=True
+            )
+            print(f"  [stub_trigger_lambdas] Created stub Lambda '{function_name}' for trigger '{trigger_key}'.")
+        except Exception as e:
+            print(f"  [stub_trigger_lambdas] Could not stub Lambda '{function_name}': {e}")
 
 def clone_rds_instances(filter_name=None):
     """
