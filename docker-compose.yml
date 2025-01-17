@@ -12,6 +12,8 @@ services:
       - AWS_ACCESS_KEY_ID=INSERT-KEY-HERE
       - AWS_SECRET_ACCESS_KEY=INSERT-SECRET-HERE
       - LOCALSTACK_AUTH_TOKEN=INSERT-TOKEN-HERE
+      - EXTRA_CORS_ALLOWED_ORIGINS=http://localhost:8080 
+      - EXTRA_CORS_ALLOWED_HEADERS=x-api-key
     volumes:
       - "${LOCALSTACK_VOLUME_DIR:-./volume}:/var/lib/localstack"
       - "/var/run/docker.sock:/var/run/docker.sock"
