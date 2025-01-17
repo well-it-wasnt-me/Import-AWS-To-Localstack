@@ -2,6 +2,22 @@
 
 Hey there, tech wizard! Ever wished you could just snap your fingers and have all your AWS resources cloned to LocalStack? Well, wish no more! This script is here to make your dreams come true – just like a genie, but without the three-wish limit. So sit back, relax, and let the magic happen.
 
+<!-- TOC -->
+* [AWS to LocalStack Cloner](#aws-to-localstack-cloner)
+  * [Features](#features)
+  * [Working on...](#working-on)
+  * [Getting Started](#getting-started)
+    * [Prerequisites](#prerequisites)
+    * [Installation](#installation)
+  * [Usage](#usage)
+    * [Interactive Mode](#interactive-mode)
+    * [Command Line Mode](#command-line-mode)
+  * [Configuration](#configuration)
+    * [Example](#example)
+  * [Troubleshooting](#troubleshooting)
+  * [Contributing](#contributing)
+<!-- TOC -->
+
 ## Features
 
 - **Clone S3 Buckets**: Because who wants to manually copy buckets? Not you.
@@ -18,6 +34,7 @@ Hey there, tech wizard! Ever wished you could just snap your fingers and have al
 
 ## Working on...
 [x] **ERROR** - ClientError: An error occurred (AccessDeniedException) when calling the CreateFunction operation: Your access has been denied by S3, please make sure your request credentials have permission to GetObject for localstack-bucket/file-path.ext. S3 Error Code: AccessDenied. S3 Error Message: Access Denied in function: function-full-name
+[] **BOTO/AWS-CLI** I know, i know...some stuff use aws-cli other boto...planning to switch entirely towards boto soon.
 
 ## Getting Started
 
@@ -26,7 +43,8 @@ Hey there, tech wizard! Ever wished you could just snap your fingers and have al
 - Python 3.x (If you don't have this, you're probably still using dial-up)
 - AWS CLI configured (because who has time for manual API calls?)
 - Docker (to keep all the techy stuff contained)
-- LocalStack (for a local AWS sandbox)
+- LocalStack PRO Account (for a local AWS sandbox)
+- LocalStack Auth Token
 
 ### Installation
 
@@ -36,7 +54,9 @@ Hey there, tech wizard! Ever wished you could just snap your fingers and have al
     cd Import-AWS-To-Localstack
     ```
    
-2. Copy .env.dist to .env and update docker-compose.yml as well with your datas
+2. Copy: .env.dist to .env and update docker-compose.yml as well with your datas
+   1. .env.dist to .env and update the values according to your needs
+   2. docker-compose.yml-dist to docker-compose.yml and update the values according to your needs  
 
 
 3. Start venv and install the dependencies:
@@ -48,11 +68,11 @@ Hey there, tech wizard! Ever wished you could just snap your fingers and have al
 
 4. Make sure Docker is running. If not, give it a nudge or a kick.
 
-### Usage
+## Usage
 
 You can run this script in two fabulous ways:
 
-#### Interactive Mode
+### Interactive Mode
 
 Just run the script without any arguments and follow the prompts. It's easier than getting through a TSA checkpoint.
 
@@ -60,7 +80,7 @@ Just run the script without any arguments and follow the prompts. It's easier th
 python import_aws_to_localstack.py
 ```
 
-#### Command Line Mode
+### Command Line Mode
 For those who love command-line arguments more than coffee:
 
 - Clone EVERYTHING
