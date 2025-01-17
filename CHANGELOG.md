@@ -1,7 +1,48 @@
 # CHANGELOG
 
 
+## v0.5.0 (2025-01-17)
+
+### Bug Fixes
+
+- **cognito**: Fixing cognito support
+  ([`a85e2e4`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/a85e2e433cf9da3fcff0fad1c3e5a037b9e6bda4))
+
+- **cognito**: Fixing cognito support
+  ([`ca0a226`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/ca0a22624bd53903b886bb929aded47a740cacff))
+
+### Chores
+
+- Docker-compose update
+  ([`4f0142c`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/4f0142c5e996c8e291f1dae992e0d2854fdbc26c))
+
+- Last docker-compose update
+  ([`87c417c`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/87c417cd7ab65f5aefbc919a54cb62cd40ca0c8e))
+
+- Readme and gitignore update
+  ([`67b4ec2`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/67b4ec2c416516799a786b71dc710e658e50f12d))
+
+- Removing the now ignored docker-compose.yml
+  ([`39fad7c`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/39fad7c1ac0509196be00ccfe3ddc2a345f69e7a))
+
+### Features
+
+- Adding sesv2 service
+  ([`6a220e9`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/6a220e9278e04ae16d654908c94b43fc2a2fe349))
+
+- **cognito**: Stub for related lambda
+  ([`7e6b718`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/7e6b718a86548ebf971d9ca495d2e29a0f81a708))
+
+- **cognito**: Users import
+  ([`4bf0e97`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/4bf0e97d3905136ff273bc29f1c2382ab23896e3))
+
+
 ## v0.4.0 (2025-01-06)
+
+### Chores
+
+- Readme update and env template update
+  ([`b0ae471`](https://github.com/well-it-wasnt-me/Import-AWS-To-Localstack/commit/b0ae471df0a15797557f3ab2d79411c81fff2e8e))
 
 ### Features
 
