@@ -27,8 +27,10 @@ LOCALSTACK_ENDPOINT = os.environ.get("LOCALSTACK_ENDPOINT", "http://localhost:45
 LOCALSTACK_S3_BUCKET = os.environ.get("LOCALSTACK_S3_BUCKET", "localstack2-bucket")
 
 # Configure logging
-logging.basicConfig(filename=os.environ.get("LOG_FILE_NAME", "clone_aws_to_localstack.log"), level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(filename=os.environ.get("LOG_FILE_NAME", "clone_aws_to_localstack.log"), level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger()
+
 
 def run_command(command):
     """Run a shell command and return the output."""
@@ -37,6 +39,7 @@ def run_command(command):
         logger.error(f"Error running command: {command} - {result.stderr}")
         return None, result.stderr
     return result.stdout, None
+
 
 # AWS RDS master credentials
 AWS_RDS_MASTER_USERNAME = os.environ.get("AWS_RDS_MASTER_USERNAME", "admin")
@@ -48,6 +51,7 @@ LOCAL_MYSQL_PORT = int(os.environ.get("LOCAL_MYSQL_PORT", "3306"))
 LOCAL_MYSQL_USER = os.environ.get("LOCAL_MYSQL_USER", "master")
 LOCAL_MYSQL_PASSWORD = os.environ.get("LOCAL_MYSQL_PASSWORD", "secret99")
 LOCAL_MYSQL_DATABASE = os.environ.get("LOCAL_MYSQL_DATABASE", "mydb")
+
 
 def clone_s3_buckets(filter_name=None):
     """Clone S3 buckets from AWS to LocalStack."""
@@ -66,6 +70,7 @@ def clone_s3_buckets(filter_name=None):
             if error:
                 print(f"Failed to create S3 bucket '{bucket_name}': {error}")
 
+
 def clone_ec2_instances(filter_name=None):
     """Clone EC2 instances from AWS to LocalStack."""
     output, error = run_command(LIST_COMMANDS["ec2"])
@@ -82,6 +87,7 @@ def clone_ec2_instances(filter_name=None):
                 # EC2 is limited in LocalStack; consider mocking or skipping detailed cloning.
                 pass
 
+
 def ensure_bucket_exists(bucket_name, s3_client):
     """Ensure the specified S3 bucket exists in LocalStack."""
     try:
@@ -95,6 +101,7 @@ def ensure_bucket_exists(bucket_name, s3_client):
         else:
             # Re-raise if it's an unexpected error
             raise
+
 
 def clone_lambda_functions(filter_name=None):
     """Clone Lambda functions from AWS to LocalStack."""
@@ -170,6 +177,7 @@ def clone_lambda_functions(filter_name=None):
                 if local_code_path and os.path.exists(local_code_path):
                     os.remove(local_code_path)
 
+
 def clone_sqs_queues(filter_name=None):
     """Clone SQS queues from AWS to LocalStack."""
     output, error = run_command(LIST_COMMANDS["sqs"])
@@ -189,8 +197,10 @@ def clone_sqs_queues(filter_name=None):
 
 
 def clone_cognito_user_pools(filter_name=None):
-    """Clone Cognito User Pools (and associated clients) from AWS to LocalStack,
-       including copying users from the pool."""
+    """
+    Clone Cognito User Pools (and associated clients) from AWS to LocalStack,
+    including copying users from the pool, using Boto3 calls to create the pool.
+    """
     cognito_client_aws = boto3.client('cognito-idp')
     cognito_client_local = boto3.client('cognito-idp', endpoint_url=LOCALSTACK_ENDPOINT)
 
@@ -203,13 +213,12 @@ def clone_cognito_user_pools(filter_name=None):
 
             pool_id = user_pool['Id']
             pool_details = cognito_client_aws.describe_user_pool(UserPoolId=pool_id)['UserPool']
+            print(pool_details.get("SchemaAttributes"))
 
-            # --------------------------------------------------
-            # 1) Create the User Pool itself in LocalStack
-            # --------------------------------------------------
-            # We declare "custom:company" in the schema so that
-            # user attributes with custom:company do not fail.
-            schema_definition = [
+            # ----------------------------------------------------------------
+            # 1) Build the arguments for creating the user pool in LocalStack
+            # ----------------------------------------------------------------
+            aws_schema = [
                 {
                     "Name": "custom:company",
                     "AttributeDataType": "String",
@@ -217,67 +226,52 @@ def clone_cognito_user_pools(filter_name=None):
                     "Mutable": True
                 }
             ]
-            schema_json = json.dumps(schema_definition)
 
-            create_pool_command = [
-                "aws",
-                "--endpoint-url", LOCALSTACK_ENDPOINT,
-                "cognito-idp",
-                "create-user-pool",
-                "--pool-name", f"'{pool_details['Name']}'",
-                "--schema", f"'{schema_json}'"
-            ]
+            create_pool_args = {
+                "PoolName": pool_details["Name"],
+                "Schema": aws_schema,  # includes custom attributes if present
+            }
 
-            # If there's a Policies structure (e.g. PasswordPolicy), convert it to JSON
-            if 'Policies' in pool_details:
-                create_pool_command += [
-                    "--policies",
-                    f"'{json.dumps(pool_details['Policies'])}'"
-                ]
+            if "Policies" in pool_details:
+                create_pool_args["Policies"] = pool_details["Policies"]
+            if "LambdaConfig" in pool_details:
+                create_pool_args["LambdaConfig"] = pool_details["LambdaConfig"]
+            # am i forgetting something ?
 
-            # If auto-verified attributes exist
-            if 'AutoVerifiedAttributes' in pool_details and pool_details['AutoVerifiedAttributes']:
-                av_atts = " ".join(pool_details['AutoVerifiedAttributes'])
-                create_pool_command += ["--auto-verified-attributes", av_atts]
-
-            create_pool_command_str = " ".join(create_pool_command)
-            output, error = run_command(create_pool_command_str)
-            if error:
-                print(f"Failed to create Cognito User Pool '{pool_details['Name']}': {error}")
-                continue
-
-            # Parse the newly created user pool ID from CLI output
+            # ----------------------------------------------------------------
+            # 2) Actually create the pool in LocalStack
+            # ----------------------------------------------------------------
             try:
-                local_pool_response = json.loads(output)
-                local_user_pool_id = local_pool_response['UserPool']['Id']
+                local_pool_resp = cognito_client_local.create_user_pool(**create_pool_args)
+                local_user_pool_id = local_pool_resp["UserPool"]["Id"]
+                print(f"Created Cognito User Pool '{pool_details['Name']}' in LocalStack (ID: {local_user_pool_id}).")
             except Exception as e:
-                logger.error(f"Could not parse newly created LocalStack User Pool ID: {output}")
-                print(f"Could not parse newly created LocalStack User Pool ID: {output}")
+                logger.error(f"Failed to create user pool '{pool_details['Name']}' in LocalStack: {e}")
+                print(f"Failed to create user pool '{pool_details['Name']}' in LocalStack: {e}")
                 continue
 
-            print(f"Created Cognito User Pool '{pool_details['Name']}' in LocalStack (ID: {local_user_pool_id}).")
-
-            # --------------------------------------------------
-            # 2) Clone the User Pool Clients
-            # --------------------------------------------------
+            # ----------------------------------------------------------------
+            # 3) Clone User Pool Clients
+            # ----------------------------------------------------------------
             try:
                 user_pool_clients = cognito_client_aws.list_user_pool_clients(
                     UserPoolId=pool_id,
                     MaxResults=60
-                )['UserPoolClients']
+                )["UserPoolClients"]
 
                 for upc in user_pool_clients:
-                    client_id_aws = upc['ClientId']
+                    client_id_aws = upc["ClientId"]
                     try:
                         client_details = cognito_client_aws.describe_user_pool_client(
                             UserPoolId=pool_id,
                             ClientId=client_id_aws
-                        )['UserPoolClient']
+                        )["UserPoolClient"]
 
                         create_client_params = {
                             "UserPoolId": local_user_pool_id,
                             "ClientName": client_details["ClientName"],
-                            "AllowedOAuthFlowsUserPoolClient": client_details.get("AllowedOAuthFlowsUserPoolClient", False),
+                            "AllowedOAuthFlowsUserPoolClient": client_details.get("AllowedOAuthFlowsUserPoolClient",
+                                                                                  False),
                             "AllowedOAuthFlows": client_details.get("AllowedOAuthFlows", []),
                             "AllowedOAuthScopes": client_details.get("AllowedOAuthScopes", []),
                             "CallbackURLs": client_details.get("CallbackURLs", []),
@@ -292,50 +286,47 @@ def clone_cognito_user_pools(filter_name=None):
                             "IdTokenValidity": client_details.get("IdTokenValidity", 60),
                         }
 
-                        # Remove any None values
+                        # Remove None values
                         create_client_params = {
                             k: v for k, v in create_client_params.items() if v is not None
                         }
 
                         client_resp = cognito_client_local.create_user_pool_client(**create_client_params)
-                        new_client_id_local = client_resp['UserPoolClient']['ClientId']
+                        new_client_id_local = client_resp["UserPoolClient"]["ClientId"]
                         print(f"  -> Created client '{client_details['ClientName']}' in LocalStack "
                               f"(new ID: {new_client_id_local}; old ID: {client_id_aws})")
+
                     except Exception as ex_client:
-                        logger.error(f"Failed to clone client '{client_id_aws}' for pool '{pool_id}': {ex_client}")
-                        print(f"Failed to clone client '{client_id_aws}' for pool '{pool_id}': {ex_client}")
+                        logger.error(f"Failed to clone client '{client_id_aws}' for AWS pool '{pool_id}': {ex_client}")
+                        print(f"Failed to clone client '{client_id_aws}' for AWS pool '{pool_id}': {ex_client}")
 
             except Exception as ex_clients:
                 logger.error(f"Failed to list/describe user pool clients for '{pool_id}': {ex_clients}")
                 print(f"Failed to list/describe user pool clients for '{pool_id}': {ex_clients}")
 
-            # --------------------------------------------------
-            # 3) Clone the Users
-            # --------------------------------------------------
+            # ----------------------------------------------------------------
+            # 4) Clone the Users
+            # ----------------------------------------------------------------
+            # Use pagination to fetch all users from AWS
             try:
                 pagination_token = None
                 while True:
                     if pagination_token:
-                        resp = cognito_client_aws.list_users(
+                        resp_users = cognito_client_aws.list_users(
                             UserPoolId=pool_id,
                             PaginationToken=pagination_token
                         )
                     else:
-                        resp = cognito_client_aws.list_users(UserPoolId=pool_id)
+                        resp_users = cognito_client_aws.list_users(UserPoolId=pool_id)
 
-                    aws_users = resp.get('Users', [])
+                    aws_users = resp_users.get("Users", [])
                     for aws_user in aws_users:
-                        username = aws_user['Username']
-                        user_attributes = aws_user.get('Attributes', [])
-
-                        # If you also have additional custom attributes (like custom:department, custom:role, etc.)
-                        # either define them in the LocalStack schema OR remove them if you don't need them:
-                        #
-                        # Example remove them if not needed:
-                        # user_attributes = [
-                        #     att for att in user_attributes
-                        #     if not att['Name'].startswith('custom:')
-                        # ]
+                        username = aws_user["Username"]
+                        user_attributes = aws_user.get("Attributes", [])
+                        print("User has attributes:", user_attributes)
+                        # If you have custom attributes that are *not* in the local schema,
+                        # you can either define them in the local schema or remove them here, e.g.:
+                        # user_attributes = [att for att in user_attributes if not att["Name"].startswith("custom:")]
 
                         try:
                             cognito_client_local.admin_create_user(
@@ -345,13 +336,13 @@ def clone_cognito_user_pools(filter_name=None):
                                 TemporaryPassword="TempPass123!",
                                 MessageAction="SUPPRESS"
                             )
-                            print(f"  -> Created user '{username}' in LocalStack pool '{local_user_pool_id}'")
+                            print(f"    -> Created user '{username}' in LocalStack pool '{local_user_pool_id}'")
 
                         except Exception as user_err:
                             logger.error(f"Failed to clone user '{username}': {user_err}")
                             print(f"Failed to clone user '{username}': {user_err}")
 
-                    pagination_token = resp.get('PaginationToken')
+                    pagination_token = resp_users.get("PaginationToken")
                     if not pagination_token:
                         break
 
@@ -362,7 +353,6 @@ def clone_cognito_user_pools(filter_name=None):
     except Exception as e:
         logger.error(f"Error cloning Cognito User Pools: {e}")
         print(f"Error cloning Cognito User Pools: {e}")
-
 
 
 def clone_rds_instances(filter_name=None):
@@ -488,6 +478,7 @@ def clone_rds_instances(filter_name=None):
         logger.error(f"Error cloning RDS instances: {e}")
         print(f"Error cloning RDS instances: {e}")
 
+
 def clone_dynamodb_tables(filter_name=None):
     """Clone DynamoDB tables from AWS to LocalStack."""
 
@@ -610,14 +601,17 @@ def wait_for_localstack():
             logger.warning(f"Waiting for LocalStack to be ready: {e}")
         time.sleep(5)
 
+
 def print_banner():
     f = Figlet(font='chunky')
     print(f.renderText('AWS to LocalStack'))
+
 
 def display_menu():
     print("Select services to clone:")
     print("1. Clone all services")
     print("2. Clone specific services (s3, ec2, lambda, sqs, cognito, rds, dynamodb)")
+
 
 def start_localstack():
     """Start LocalStack using Docker Compose and wait until it's ready."""
@@ -627,6 +621,7 @@ def start_localstack():
     except Exception as e:
         logger.error(f"Failed to start LocalStack: {e}")
         raise
+
 
 def main(clone_all, filter_name=None, selected_services=None):
     try:
@@ -670,6 +665,7 @@ def main(clone_all, filter_name=None, selected_services=None):
     except Exception as e:
         print(f"An error occurred: {e}")
         logger.error(f"An error occurred: {e}")
+
 
 if __name__ == "__main__":
     try:
