@@ -239,11 +239,11 @@ def clone_cognito_user_pools(filter_name=None):
 
             # If there's a LambdaConfig, replicate it if you want triggers. Or remove it if you don't.
             if "LambdaConfig" in pool_details:
-                # Step A) Stub each function ARN so it's recognized in LocalStack
+                # Stub each function ARN so it's recognized in LocalStack
                 lambda_config = pool_details["LambdaConfig"]
                 stub_trigger_lambdas(lambda_config, lambda_client_local)
 
-                # Step B) Now include it in create_pool_args so the triggers apply
+                # Now include it in create_pool_args so the triggers apply
                 create_pool_args["LambdaConfig"] = lambda_config
 
             # ----------------------------------------------------------------
@@ -361,8 +361,7 @@ def stub_trigger_lambdas(lambda_config, lambda_client_local):
     so that Cognito won't fail with 'Function not found'.
     """
 
-    # A quick sample Python code for the stub function
-    # (just returns the event unchanged).
+    # Quick sample - (just returns the event unchanged).
     STUB_CODE = (
         "def lambda_handler(event, context):\n"
         "    return event\n"
@@ -382,7 +381,7 @@ def stub_trigger_lambdas(lambda_config, lambda_client_local):
             continue  # skip if it's not a valid ARN
 
         # Extract the function name from the ARN:
-        # e.g. "arn:aws:lambda:us-east-1:123456789012:function:MyFunc"
+        # example: "arn:aws:lambda:us-east-1:123456789012:function:MyFunc"
         function_name = trigger_arn.split(":function:")[-1]
 
         # Check if it already exists in LocalStack
@@ -391,9 +390,9 @@ def stub_trigger_lambdas(lambda_config, lambda_client_local):
             print(f"  [stub_trigger_lambdas] Lambda '{function_name}' already exists in LocalStack.")
             continue
         except lambda_client_local.exceptions.ResourceNotFoundException:
-            pass  # We'll create it
+            pass
 
-        # Actually create a stub
+        # Create a stub
         try:
             resp = lambda_client_local.create_function(
                 FunctionName=function_name,
