@@ -4,11 +4,14 @@ services:
   localstack:
     image: localstack/localstack-pro
     ports:
-      - "4566:4566"
-      - "4571:4571"
+      - "127.0.0.1:4566:4566"
+      - "127.0.0.1:4510-4559:4510-4559"
     environment:
       - SERVICES=s3,ec2,lambda,sqs,cognito-idp,rds,dynamodb
       - DEFAULT_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=INSERT-KEY-HERE
       - AWS_SECRET_ACCESS_KEY=INSERT-SECRET-HERE
       - LOCALSTACK_AUTH_TOKEN=INSERT-TOKEN-HERE
+    volumes:
+      - "${LOCALSTACK_VOLUME_DIR:-./volume}:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
